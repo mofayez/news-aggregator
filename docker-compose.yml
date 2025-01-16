@@ -1,0 +1,83 @@
+version: "3.7"
+
+services:
+  # Backend Service
+  app:
+    build:
+      context: ./news-aggregator-backend
+      dockerfile: Dockerfile
+      args:
+        user: news_aggregator
+        uid: 1000
+    image: news_aggregator_backend
+    container_name: news_aggregator_backend
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      - ./news-aggregator-backend:/var/www
+    env_file:
+      - ./news-aggregator-backend/.env
+    networks:
+      - news_aggregator_network
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      bash -c "wait-for-db.sh && entrypoint.sh && php-fpm"
+
+  # MySQL Service
+  db:
+    image: mysql:8.0
+    container_name: news_aggregator_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootPass
+      MYSQL_DATABASE: news_aggregator
+      MYSQL_USER: news_aggregator
+      MYSQL_PASSWORD: rootPass
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - news_aggregator_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "db", "-u", "root", "-prootPass"]
+      interval: 5s
+      retries: 10
+      start_period: 30s 
+
+  # Nginx Webserver
+  nginx:
+    image: nginx:alpine
+    container_name: news_aggregator_nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"  # Maps host port 8000 to container port 80
+    volumes:
+      - ./news-aggregator-backend:/var/www    # Mounts the backend code for Nginx to serve
+      - ./news-aggregator-backend/nginx.conf:/etc/nginx/conf.d/default.conf  # Mount Nginx config as a file
+    networks:
+      - news_aggregator_network
+    depends_on:
+      - app
+
+  # Frontend Service (React)
+  frontend:
+    build:
+      context: ./news-aggregator-frontend
+      dockerfile: Dockerfile
+    image: news_aggregator_frontend
+    container_name: news_aggregator_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - news_aggregator_network
+    depends_on:
+      - app
+
+volumes:
+  mysql_data:  # Persistent volume for MySQL data
+
+networks:
+  news_aggregator_network:
+    driver: bridge
